@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ruumiandur — WiFi levi jälgija</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115;
+    color: #e8e8e8;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 24px; }
+
+  .status-card {
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 24px;
+    border: 1px solid #2a2d35;
+    background: #161920;
+  }
+  .status-label { font-size: 0.8rem; color: #888; margin-bottom: 10px; }
+  .status-row table { margin: 0; }
+  .status-row th { padding-top: 0; }
+  .status-detail { font-size: 0.8rem; color: #aaa; margin-top: 10px; }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge-hea { background: #1e3a2a; color: #4ade80; }
+  .badge-normaalne { background: #3a3520; color: #fbbf24; }
+  .badge-kehv { background: #3a2020; color: #f87171; }
+  .badge-puudub { background: #2a2a2a; color: #888; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #22252c;
+  }
+  th { color: #888; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+
+  .section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 28px 0 12px;
+  }
+
+  .chart-wrap {
+    background: #161920;
+    border: 1px solid #2a2d35;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 8px;
+  }
+
+  .ai-section {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid #22252c;
+  }
+  button {
+    background: #4a5fd9;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button:disabled { background: #333; cursor: default; }
+  button:hover:not(:disabled) { background: #3a4fc9; }
+
+  .ai-result {
+    margin-top: 16px;
+    padding: 16px;
+    background: #161920;
+    border: 1px solid #2a2d35;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    display: none;
+  }
+
+  .error { color: #f87171; font-size: 0.85rem; margin-top: 8px; }
+  .footer-note { color: #555; font-size: 0.75rem; margin-top: 32px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+
+  <h1>WiFi levi andur</h1>
+  <div class="subtitle" id="deviceLabel">esp32-c3-1</div>
+
+  <div class="status-card">
+    <div class="status-label">Praegune levi</div>
+    <div class="status-row">
+      <table>
+        <thead>
+          <tr>
+            <th>Signaal</th>
+            <th>Kvaliteet</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="statusSignal">Laadin...</td>
+            <td id="statusQuality"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="status-detail" id="statusDetail"></div>
+  </div>
+
+  <div class="section-title">Ajalugu (viimane tund)</div>
+  <div class="chart-wrap">
+    <canvas id="historyChart" height="90"></canvas>
+  </div>
+
+  <div class="ai-section">
+    <button id="aiButton" onclick="requestAiSummary()">AI hinnang viimase 24h andmete põhjal</button>
+    <div class="error" id="aiError"></div>
+    <div class="ai-result" id="aiResult"></div>
+  </div>
+
+  <div class="footer-note">
+    Andmed värskenevad iga 15s. Levikvaliteedi lävendid: Hea ≥ -60 dBm, Normaalne -60..-70, Kehv -70..-85, alla selle loetakse samuti Kehv.
+  </div>
+
+<script>
+  // ---- Seadista siia oma väärtused ----
+  const SUPABASE_URL = "https://bpipxrsghnqcfzhwjcts.supabase.co/rest/v1/readings";
+  const SUPABASE_KEY = "sb_publishable_LVbiMDpWm-ghzGqnRxl3Lg_rhxYxp9n";
+  const AI_SUMMARY_URL = "https://tight-moon-288a.ats-rebane.workers.dev";
+
+  const SEND_INTERVAL_MINUTES = 1; // vasta ESP32 hetke saatmisintervallile (testimiseks 1min)
+  const SILENCE_THRESHOLD_MINUTES = SEND_INTERVAL_MINUTES * 3; // "andur vaikib" lävend
+
+  function classifyQuality(avgRssi) {
+    if (avgRssi >= -60) return "hea";
+    if (avgRssi >= -70) return "normaalne";
+    return "kehv";
+  }
+
+  function qualityLabel(q) {
+    return { hea: "Hea", normaalne: "Normaalne", kehv: "Kehv", puudub: "Puudub" }[q] || q;
+  }
+
+  function badgeHtml(q) {
+    return `<span class="badge badge-${q}">${qualityLabel(q)}</span>`;
+  }
+
+  async function fetchReadings(limit = 20) {
+    const url = `${SUPABASE_URL}?select=*&order=created_at.desc&limit=${limit}`;
+    const res = await fetch(url, {
+      headers: { apikey: SUPABASE_KEY }
+    });
+    if (!res.ok) throw new Error("Andmete laadimine ebaõnnestus (" + res.status + ")");
+    return res.json();
+  }
+
+  function computeStableStatus(readingsDesc) {
+    // readingsDesc on uusim-enne, järjestatud created_at.desc järgi
+    if (readingsDesc.length === 0) return { status: "puudub", detail: "Andmeid pole veel saabunud." };
+
+    const newest = readingsDesc[0];
+    const newestTime = new Date(newest.created_at);
+    const minutesSince = (Date.now() - newestTime.getTime()) / 60000;
+
+    if (minutesSince > SILENCE_THRESHOLD_MINUTES) {
+      return {
+        status: "puudub",
+        detail: `Andur ei ole vastanud ${Math.round(minutesSince)} min. Viimati kuuldud: ${newestTime.toLocaleTimeString("et-EE")}.`
+      };
+    }
+
+    // Hüsterees: viimased 3 rida peavad olema samas kvaliteediklassis, et staatust kuvada
+    const lastThree = readingsDesc.slice(0, 3);
+    if (lastThree.length < 3) {
+      const q = classifyQuality(newest.rssi_avg);
+      return { status: q, detail: `Vähem kui 3 mõõtmist, staatus esialgne (${newest.rssi_avg} dBm).` };
+    }
+
+    const qualities = lastThree.map(r => classifyQuality(r.rssi_avg));
+    const allSame = qualities.every(q => q === qualities[0]);
+
+    if (allSame) {
+      return { status: qualities[0], detail: `Stabiilne viimase 3 mõõtmise põhjal (${newest.rssi_avg} dBm).` };
+    } else {
+      // Segane olek - näita viimast teadaolevat stabiilset, kuni 3 järjest kokku lepivad
+      return { status: classifyQuality(newest.rssi_avg), detail: `Kõikuv (${newest.rssi_avg} dBm) — staatus muutub, kui 3 mõõtmist järjest kokku lepivad.` };
+    }
+  }
+
+  async function refresh() {
+    try {
+      const readings = await fetchReadings(80); // piisavalt tunni graafiku jaoks 1min intervalliga
+      const { status, detail } = computeStableStatus(readings);
+
+      document.getElementById("statusSignal").textContent =
+        status === "puudub" ? "—" : `${readings[0].rssi_avg} dBm`;
+      document.getElementById("statusQuality").innerHTML = badgeHtml(status);
+      document.getElementById("statusDetail").textContent = detail;
+
+      updateChart(readings);
+    } catch (err) {
+      document.getElementById("statusSignal").textContent = "Viga";
+      document.getElementById("statusQuality").innerHTML = "";
+      document.getElementById("statusDetail").textContent = err.message;
+    }
+  }
+
+  let chartInstance = null;
+
+  function updateChart(readingsDesc) {
+    const container = document.querySelector(".chart-wrap");
+
+    if (readingsDesc.length === 0) {
+      container.innerHTML = '<div style="text-align:center; padding: 24px; color: #888;">Andmeid pole.</div>';
+      chartInstance = null;
+      return;
+    }
+
+    // Taasta canvas, kui eelmine kord näidati "andmeid pole" sõnumit
+    if (!document.getElementById("historyChart")) {
+      container.innerHTML = '<canvas id="historyChart" height="90"></canvas>';
+      chartInstance = null;
+    }
+
+    // Töötame otse tegelike kirjete ajatemplitega (kronoloogilises järjekorras),
+    // MITTE kunstliku fikseeritud-sammu ruudustikuga. See väldib kahte probleemi:
+    // 1) akna-piiri efekti (lünga üks pool "kaob", kui filtreerid enne võrdlust)
+    // 2) ajanihke müra (tegelik saatmisintervall kõigub veidi, mistõttu fikseeritud
+    //    ruudustik tekitab valesid mikro-lünki)
+    const ascending = readingsDesc.slice().reverse();
+
+    const realPoints = [];
+    const gapPoints = [];
+
+    function pushPoint(timeMs, real, gap) {
+      realPoints.push({ x: timeMs, y: real });
+      gapPoints.push({ x: timeMs, y: gap });
+    }
+
+    for (let i = 0; i < ascending.length; i++) {
+      const r = ascending[i];
+      const tMs = new Date(r.created_at).getTime();
+
+      if (i === 0) {
+        pushPoint(tMs, r.rssi_avg, null);
+        continue;
+      }
+
+      const prev = ascending[i - 1];
+      const prevMs = new Date(prev.created_at).getTime();
+      const gapMinutes = (tMs - prevMs) / 60000;
+
+      if (gapMinutes > SILENCE_THRESHOLD_MINUTES) {
+        // Märgi lünga algus eelmisele (juba lisatud) punktile
+        gapPoints[gapPoints.length - 1].y = prev.rssi_avg;
+        // Sisesta katkestav tühi punkt TÄPSELT lünga keskele (ajaliselt), et sinine joon katkeks
+        pushPoint((prevMs + tMs) / 2, null, null);
+        // Praegune punkt on lünga lõpp
+        pushPoint(tMs, r.rssi_avg, r.rssi_avg);
+      } else {
+        pushPoint(tMs, r.rssi_avg, null);
+      }
+    }
+
+    // Käimasolev vaikimine: kui viimasest tegelikust kirjest on möödas rohkem kui lävend,
+    // venita punktiirjoon viimasest teadaolevast väärtusest praeguse hetkeni
+    const lastReal = ascending[ascending.length - 1];
+    const minutesSinceLast = (Date.now() - new Date(lastReal.created_at).getTime()) / 60000;
+    if (minutesSinceLast > SILENCE_THRESHOLD_MINUTES) {
+      gapPoints[gapPoints.length - 1].y = lastReal.rssi_avg;
+      pushPoint(Date.now(), null, lastReal.rssi_avg);
+    }
+
+    // Kuvamise akna piirang: lünga-tuvastus (ülal) töötab kogu ajaloo peal, et vältida
+    // akna-piiri efekti, aga GRAAFIK ise näitab ainult viimast DISPLAY_RANGE_MINUTES
+    // enne UUSIMAT punkti (mitte praegust hetke) - nii ei veni telg tundide taha, kui
+    // seade oli pikalt väljas ja äsja taaskäivitus.
+    const DISPLAY_RANGE_MINUTES = 60;
+    const displayCutoff = realPoints[realPoints.length - 1].x - DISPLAY_RANGE_MINUTES * 60000;
+    let startIndex = realPoints.findIndex(p => p.x >= displayCutoff);
+    if (startIndex === -1) startIndex = 0;
+    // Säilita üks punkt enne piiri, et pooleliolev punktiirjoon ei kaotaks oma algust
+    if (startIndex > 0) startIndex -= 1;
+
+    const displayRealPoints = realPoints.slice(startIndex);
+    const displayGapPoints = gapPoints.slice(startIndex);
+
+    const ctx = document.getElementById("historyChart").getContext("2d");
+
+    if (chartInstance) {
+      chartInstance.data.datasets[0].data = displayRealPoints;
+      chartInstance.data.datasets[1].data = displayGapPoints;
+      chartInstance.update();
+      return;
+    }
+
+    chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [
+          {
+            label: "RSSI (dBm)",
+            data: displayRealPoints,
+            borderColor: "#4a5fd9",
+            backgroundColor: "rgba(74, 95, 217, 0.15)",
+            fill: true,
+            tension: 0.1,
+            pointRadius: 2,
+            spanGaps: false
+          },
+          {
+            label: "Andur vaikis",
+            data: displayGapPoints,
+            borderColor: "#f87171",
+            borderDash: [5, 5],
+            fill: false,
+            tension: 0,
+            pointRadius: 0,
+            spanGaps: true
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, labels: { color: "#888", boxWidth: 12, font: { size: 11 } } }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: { unit: "minute", stepSize: 10, tooltipFormat: "HH:mm", displayFormats: { minute: "HH:mm" } },
+            ticks: { color: "#888", source: "auto" },
+            grid: { color: "#22252c" }
+          },
+          y: { ticks: { color: "#888" }, grid: { color: "#22252c" } }
+        }
+      }
+    });
+  }
+
+  async function requestAiSummary() {
+    const button = document.getElementById("aiButton");
+    const errorEl = document.getElementById("aiError");
+    const resultEl = document.getElementById("aiResult");
+
+    errorEl.textContent = "";
+    resultEl.style.display = "none";
+    button.disabled = true;
+    button.textContent = "Genereerin kokkuvõtet...";
+
+    try {
+      const res = await fetch(AI_SUMMARY_URL);
+      if (!res.ok) throw new Error("AI-otspunkt vastas veaga (" + res.status + ")");
+      const data = await res.json();
+      resultEl.textContent = data.summary || "Kokkuvõtet ei õnnestunud koostada.";
+      resultEl.style.display = "block";
+    } catch (err) {
+      errorEl.textContent = "Viga: " + err.message;
+    } finally {
+      button.disabled = false;
+      button.textContent = "AI hinnang viimase 24h andmete põhjal";
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 15000);
+</script>
+
+</body>
+</html>
