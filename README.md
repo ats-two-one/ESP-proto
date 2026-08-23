@@ -2,11 +2,12 @@ Ruumiandur — WiFi levi jälgija (prototüüp)
 
 Kuidas käivitada
 
-See prototüüp kasutab pilveteenuseid (Supabase andmebaas, Cloudflare Workers), mistõttu on käivitamiseks vaja kontosid antud keskkondades. Allpool on täpne samm-sammuline protsess, kuidas need seadistada ja kuidas komponendid omavahel ühenduvad.
+See prototüüp kasutab pilveteenuseid (Supabase andmebaas, Cloudflare Workers), mistõttu on käivitamiseks vaja kontosid antud keskkondades. index.html sisaldab hetkel minu isiklikke URL aadresse ja võtmeid. 
+Kuidas need seadistada ja kuidas komponendid omavahel ühenduvad?
 
 Riistvara (firmware):
 Ava ruumiandur.ino + config.h Arduino IDE-s
-Täida config.h oma WiFi ja Supabase andmetega ning laadi kogu komplekt ESP32 plaadile.
+Täida config.h oma WiFi ja Supabase andmetega (Kopeeri index.html failist SUPABASE_URL ja SUPABASE_KEY väärtused config.h faili) ning laadi kogu komplekt ESP32 plaadile.
 
 Backend: Supabase projekt on juba loodud.
 
