@@ -35,7 +35,7 @@ Graafik kasutab ajapõhist X-telge, et katkestuse kestus oleks visuaalselt propo
 
 Piirangud ja riskid
 
-1000 kasutajaga läheks katki: veebivaade teeb otse-REST päringuid Supabase'ile iga 15s ilma vahemäluta (Sõltub täpsemast ärivajadusest, aga see skaleeruks halvasti) Lahendus: vahemälu-kiht klientide ja andmebaasi vahele.
+1000 kasutajaga läheks katki: veebivaade teeb otse-REST päringuid Supabase'ile iga 15s ilma vahemäluta (Sõltub täpsemast ärivajadusest, aga suurma kasutajaskonnaga ei uunedaks vaadet automaatselt).
 
 RSSI nõuab aktiivset WiFi-ühendust, mis eeldaks pivecat voolutoidet.
 
@@ -50,18 +50,17 @@ AI sõnastuse kvaliteet (Llama 4 Scout, väiksem mudel) kõigub — promptis on 
 Järgmine samm
 
 
-Päris I2C andur (BME280) + deep sleep tsükkel reaalse akusäästu jaoks
-Vahemälu-kiht skaleerumise jaoks
+Päris andur + deep sleep tsükkel reaalse akusäästu jaoks
 Mitme seadme tugi (device_id on juba tabelis olemas)
 Autentimine + RLS
+Intervalide oprimeerimine ja kasutajaliides vastavalt ärivajadustele.
 
 
 Mida jätsin välja ja miks
-Migratsioonifailid, testid, konteinerid, autentimine — ajapiirangu tõttu, ülesanne ei nõua neid prototüübi jaoks. MQTT valisin HTTP kasuks (kiirem üksi ehitada ühe päevaga). "Liikumise" tuvastamine baseline-võrdlusega (algselt kaalutud) jäeti lihtsama kvaliteedi/vaikimise mudeli kasuks.
-
+Migratsioonifailid - ei olnud otseselt nõutud ja andmebaas on olemas juba. Valisin HTTP kuna on tuttav ja ka AI soovitas kiiruse mõttes. Teavitused levi kõikumisest - prototööbi jaoks pole kriitilised. 
 AI tööriistade kasutus
 
-Kasutasin Claude'i (chat) kogu arhitektuuri planeerimiseks, koodi kirjutamiseks ja silumiseks, kohati ka Cursorit. 
+Kasutasin Claude'i (chat) kogu arhitektuuri planeerimiseks, koodi kirjutamiseks ja silumiseks, kohati ka kontrollimiseks Gemini't. 
 
 
 Peamised kohad, kus AI eksis või viis valele teele:
